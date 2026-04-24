@@ -20,7 +20,7 @@ while True:
             json=data
         )
 
-        print("Enviado:", data)
+        print("Send:", data)
 
     except Exception as e:
         print("Error:", e)
