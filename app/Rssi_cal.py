@@ -1,15 +1,6 @@
 import numpy as np
 from scipy.optimize import minimize
 
-
-enum PathLossModel:
-    free_space = 2,
-    room = 3,
-    wall = 4
-
-esp_values = [{TxPower: 10, n = PathLossModel.free_space},{TxPower: 10, n = PathLossModel.free_space},{TxPower: 10, n = PathLossModel.free_space}]
-
-
 def update_esp_values(tx_power: float, path_loss_exponent: int, index: int):
     esp_values[index]['TxPower'] = tx_power
     esp_values[index]['n'] = path_loss_exponent

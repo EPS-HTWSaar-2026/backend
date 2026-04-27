@@ -32,7 +32,7 @@ app.include_router(ingest.router)
 app.include_router(status.router)
 app.include_router(tags.router)
 app.include_router(events.router)
-
+app.include_router(esp_config.router)
 
 @app.get("/")
 def root():

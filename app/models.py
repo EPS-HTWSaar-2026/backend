@@ -1,7 +1,15 @@
 from datetime import datetime
 from typing import Optional
+from enum import IntEnum
 
 from sqlmodel import Field, SQLModel
+
+
+class PathLossExponent(IntEnum):
+    ERROR = 1
+    FREE_SPACE = 2
+    ROOM = 3
+    WALL = 4
 
 
 class Tag(SQLModel, table=True):
@@ -27,3 +35,9 @@ class Event(SQLModel, table=True):
 class SystemState(SQLModel, table=True):
     id: Optional[int] = Field(default=1, primary_key=True)
     wrap260_connected: bool = Field(default=True)
+
+
+class EspConfig(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    tx_power: int
+    n: PathLossExponent = Field(default=PathLossExponent.FREE_SPACE)

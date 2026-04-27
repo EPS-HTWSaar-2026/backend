@@ -39,3 +39,17 @@ class StatusPublic(SQLModel):
     channel: Optional[int]
     last_update: Optional[datetime]
     tags_detected: int
+
+class EspConfigBase(SQLModel):
+    tx_power: int
+    n: PathLossExponent = PathLossExponent.FREE_SPACE
+
+class EspConfigCreate(EspConfigBase):
+    pass
+
+class EspConfigPublic(EspConfigBase):
+    id: int
+
+class EspConfigUpdate(SQLModel):
+    tx_power: Optional[int] = None
+    n: Optional[PathLossExponent] = None
