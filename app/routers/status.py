@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from ..db import SessionDep
+from ..database import SessionDep
 from ..schemas import StatusPublic
 from ..services import get_status
 
