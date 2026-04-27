@@ -1,7 +1,7 @@
 import serial
 import json
 
-ser = serial.Serial("COM7", 115200, timeout=1)
+ser = serial.Serial("COM6", 115200, timeout=1)
 
 buffer = ""
 
@@ -45,4 +45,4 @@ while True:
                 """
 
             except json.JSONDecodeError:
-                print("JSON incompleto o corrupto")
+                print("JSON invalid:", json_str)
