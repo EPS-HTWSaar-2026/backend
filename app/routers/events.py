@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query
 
-from ..db import SessionDep
+from ..database import SessionDep
 from ..schemas import EventPublic
 from ..services import get_recent_events
 

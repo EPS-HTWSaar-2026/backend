@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from ..db import SessionDep
+from ..database import SessionDep
 from ..schemas import IngestPayload
 from ..services import ingest_payload
 

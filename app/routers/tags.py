@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from ..db import SessionDep
+from ..database import SessionDep
 from ..schemas import TagPublic
 from ..services import get_tags_with_fresh_status
 
