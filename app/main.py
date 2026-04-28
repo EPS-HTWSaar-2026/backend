@@ -5,13 +5,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .database import create_db_and_tables
 from .routers import ingest, status, tags, events
+from .ethernet import start_ethernet_listeners
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_db_and_tables()
+    app.state.ethernet_tasks = await start_ethernet_listeners()
     yield
-
+    for task in app.state.ethernet_tasks:
+        task.cancel()
 
 app = FastAPI(
     title="RTLS Monitoring Backend",
