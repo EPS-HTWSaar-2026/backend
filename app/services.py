@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from .models import Tag, Listener, Packet
@@ -99,6 +100,10 @@ def save_packet(tag_mac: str, esp_mac: str, rssi: int, timestamp: datetime, sess
     # Auto-create tag if first time seen
     if session.get(Tag, tag_mac) is None:
         session.add(Tag(tag_mac=tag_mac))
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
 
     session.add(Packet(tag_mac=tag_mac, esp_mac=esp_mac, rssi=rssi, timestamp=timestamp))
     session.commit()

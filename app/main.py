@@ -1,12 +1,15 @@
+import logging
 from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from .database import create_db_and_tables
 from .routers import tags, listeners, packets
 from .ethernet import start_ethernet_listeners
 
+logging.basicConfig(
+    level=logging.DEBUG, #TODO: Change to INFO for release
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
