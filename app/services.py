@@ -3,139 +3,130 @@ from typing import Optional
 
 from sqlmodel import Session, select
 
-from .models import Tag, Event, SystemState
-from .schemas import IngestPayload, TagPublic, EventPublic, StatusPublic
-
-#
-# ONLINE_THRESHOLD_SECONDS = 10
-# STALE_THRESHOLD_SECONDS = 30
-#
-#
-# def normalize_event(event: str) -> str:
-#     event = event.strip().lower()
-#     if event in {"heartbeat", "button", "detected"}:
-#         return event
-#     return "unknown"
-#
-#
-# def compute_tag_status(last_seen: datetime, now: Optional[datetime] = None) -> str:
-#     now = now or datetime.now(timezone.utc)
-#
-#     if last_seen.tzinfo is None:
-#         last_seen = last_seen.replace(tzinfo=timezone.utc)
-#
-#     delta = (now - last_seen).total_seconds()
-#
-#     if delta <= ONLINE_THRESHOLD_SECONDS:
-#         return "online"
-#     if delta <= STALE_THRESHOLD_SECONDS:
-#         return "stale"
-#     return "offline"
+from .models import Tag, Listener, Packet
+from .schemas import TagResponse, ListenerResponse, PacketResponse
 
 
-def ingest_payload(payload: IngestPayload, session: Session) -> dict:
-    normalized_event = normalize_event(payload.event)
+# --- Tags ---
 
-    timestamp = payload.timestamp
+def get_tags(session: Session) -> list[TagResponse]:
+    tags = session.exec(select(Tag)).all()
+    return [TagResponse(tag_mac=t.tag_mac, x=t.x, y=t.y) for t in tags]
+
+
+def get_tag(tag_mac: str, session: Session) -> Optional[TagResponse]:
+    tag = session.get(Tag, tag_mac)
+    if tag is None:
+        return None
+    return TagResponse(tag_mac=tag.tag_mac, x=tag.x, y=tag.y)
+
+
+def update_tag(tag_mac: str, x: Optional[float], y: Optional[float], session: Session) -> Optional[TagResponse]:
+    tag = session.get(Tag, tag_mac)
+    if tag is None:
+        return None
+    tag.x = x
+    tag.y = y
+    session.add(tag)
+    session.commit()
+    session.refresh(tag)
+    return TagResponse(tag_mac=tag.tag_mac, x=tag.x, y=tag.y)
+
+
+def delete_tag(tag_mac: str, session: Session) -> bool:
+    tag = session.get(Tag, tag_mac)
+    if tag is None:
+        return False
+    session.delete(tag)
+    session.commit()
+    return True
+
+
+# --- Listeners ---
+
+def get_listeners(session: Session) -> list[ListenerResponse]:
+    listeners = session.exec(select(Listener)).all()
+    return [ListenerResponse(esp_mac=l.esp_mac, x=l.x, y=l.y) for l in listeners]
+
+
+def get_listener(esp_mac: str, session: Session) -> Optional[ListenerResponse]:
+    listener = session.get(Listener, esp_mac)
+    if listener is None:
+        return None
+    return ListenerResponse(esp_mac=listener.esp_mac, x=listener.x, y=listener.y)
+
+
+def create_listener(esp_mac: str, x: Optional[float], y: Optional[float], session: Session) -> ListenerResponse:
+    listener = session.get(Listener, esp_mac)
+    if listener is None:
+        listener = Listener(esp_mac=esp_mac, x=x, y=y)
+    else:
+        listener.x = x
+        listener.y = y
+    session.add(listener)
+    session.commit()
+    session.refresh(listener)
+    return ListenerResponse(esp_mac=listener.esp_mac, x=listener.x, y=listener.y)
+
+
+def update_listener(esp_mac: str, x: Optional[float], y: Optional[float], session: Session) -> Optional[ListenerResponse]:
+    listener = session.get(Listener, esp_mac)
+    if listener is None:
+        return None
+    listener.x = x
+    listener.y = y
+    session.add(listener)
+    session.commit()
+    session.refresh(listener)
+    return ListenerResponse(esp_mac=listener.esp_mac, x=listener.x, y=listener.y)
+
+
+def delete_listener(esp_mac: str, session: Session) -> bool:
+    listener = session.get(Listener, esp_mac)
+    if listener is None:
+        return False
+    session.delete(listener)
+    session.commit()
+    return True
+
+
+# --- Packets ---
+
+def save_packet(tag_mac: str, esp_mac: str, rssi: int, timestamp: datetime, session: Session) -> None:
     if timestamp.tzinfo is None:
         timestamp = timestamp.replace(tzinfo=timezone.utc)
 
-    db_tag = session.get(Tag, payload.tag_id)
+    # Auto-create tag if first time seen
+    if session.get(Tag, tag_mac) is None:
+        session.add(Tag(tag_mac=tag_mac))
 
-    if db_tag is None:
-        db_tag = Tag(
-            tag_id=payload.tag_id,
-            last_seen=timestamp,
-            rssi=payload.rssi,
-            channel=payload.channel,
-            source=payload.source,
-        )
-    else:
-        db_tag.last_seen = timestamp
-        db_tag.rssi = payload.rssi
-        db_tag.channel = payload.channel
-        db_tag.source = payload.source
-
-    session.add(db_tag)
+    session.add(Packet(tag_mac=tag_mac, esp_mac=esp_mac, rssi=rssi, timestamp=timestamp))
     session.commit()
-    session.refresh(db_tag)
-
-    return {
-        "ok": True,
-        "message": "Payload processed successfully",
-        "tag_id": db_tag.tag_id,
-    }
 
 
-def get_tags_with_fresh_status(session: Session) -> list[TagPublic]:
-    now = datetime.now(timezone.utc)
-
-    statement = select(Tag).order_by(Tag.last_seen.desc())
-    tags = session.exec(statement).all()
-
-    refreshed = []
-    for tag in tags:
-        refreshed.append(
-            TagPublic(
-                tag_id=tag.tag_id,
-                last_seen=tag.last_seen,
-                rssi=tag.rssi,
-                status=compute_tag_status(tag.last_seen, now),
-                last_event=tag.last_event,
-                channel=tag.channel,
-                source=tag.source,
-            )
-        )
-    return refreshed
-
-
-def get_recent_events(session: Session, limit: int = 50) -> list[EventPublic]:
-    statement = select(Event).order_by(Event.time.desc()).limit(limit)
-    events = session.exec(statement).all()
-
+def get_packets(session: Session, tag_mac: Optional[str] = None, limit: int = 100) -> list[PacketResponse]:
+    statement = select(Packet)
+    if tag_mac:
+        statement = statement.where(Packet.tag_mac == tag_mac)
+    statement = statement.order_by(Packet.timestamp.desc()).limit(limit)
+    packets = session.exec(statement).all()
     return [
-        EventPublic(
-            id=event.id,
-            time=event.time,
-            tag_id=event.tag_id,
-            type=event.type,
-            rssi=event.rssi,
-            source=event.source,
-            channel=event.channel,
-        )
-        for event in events
+        PacketResponse(id=p.id, tag_mac=p.tag_mac, esp_mac=p.esp_mac, rssi=p.rssi, timestamp=p.timestamp)
+        for p in packets
     ]
 
 
-def get_status(session: Session) -> StatusPublic:
-    now = datetime.now(timezone.utc)
+def get_packet(packet_id: int, session: Session) -> Optional[PacketResponse]:
+    packet = session.get(Packet, packet_id)
+    if packet is None:
+        return None
+    return PacketResponse(id=packet.id, tag_mac=packet.tag_mac, esp_mac=packet.esp_mac, rssi=packet.rssi, timestamp=packet.timestamp)
 
-    last_event_statement = select(Event).order_by(Event.time.desc()).limit(1)
-    last_event = session.exec(last_event_statement).first()
 
-    system_state = session.get(SystemState, 1)
-    if system_state is None:
-        system_state = SystemState(id=1, wrap260_connected=True)
-        session.add(system_state)
-        session.commit()
-        session.refresh(system_state)
-
-    last_update = last_event.time if last_event else None
-    last_channel = last_event.channel if last_event else None
-
-    esp32_connected = False
-    if last_update is not None:
-        if last_update.tzinfo is None:
-            last_update = last_update.replace(tzinfo=timezone.utc)
-        esp32_connected = (now - last_update).total_seconds() <= 15
-
-    count_statement = select(Tag)
-    tags_detected = len(session.exec(count_statement).all())
-
-    return StatusPublic(
-        esp32_connected=esp32_connected,
-        wrap260_connected=system_state.wrap260_connected,
-        channel=last_channel,
-        last_update=last_update,
-        tags_detected=tags_detected,
-    )
+def delete_packet(packet_id: int, session: Session) -> bool:
+    packet = session.get(Packet, packet_id)
+    if packet is None:
+        return False
+    session.delete(packet)
+    session.commit()
+    return True

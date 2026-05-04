@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import create_db_and_tables
-from .routers import ingest, status, tags
+from .routers import tags, listeners, packets
 from .ethernet import start_ethernet_listeners
 
 
@@ -16,10 +16,11 @@ async def lifespan(app: FastAPI):
     for task in app.state.ethernet_tasks:
         task.cancel()
 
+
 app = FastAPI(
     title="RTLS Monitoring Backend",
     description="Backend for ESP32-based tag monitoring and visualization",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -31,9 +32,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(ingest.router)
-app.include_router(status.router)
 app.include_router(tags.router)
+app.include_router(listeners.router)
+app.include_router(packets.router)
+
 
 @app.get("/")
 def root():

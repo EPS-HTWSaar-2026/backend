@@ -1,11 +1,46 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlmodel import Field, SQLModel
+from sqlmodel import SQLModel
 
 
-class IngestPayload(SQLModel):
-    tag_id: str = Field(..., min_length=1)
+# --- Packet ---
+
+class PacketResponse(SQLModel):
+    id: Optional[int] = None
+    tag_mac: str
+    esp_mac: str
     rssi: int
-    source: str = Field(..., min_length=1)
     timestamp: datetime
+
+
+# --- Tag ---
+
+class TagResponse(SQLModel):
+    tag_mac: str
+    x: Optional[float] = None
+    y: Optional[float] = None
+
+
+class TagUpdate(SQLModel):
+    x: Optional[float] = None
+    y: Optional[float] = None
+
+
+# --- Listener ---
+
+class ListenerResponse(SQLModel):
+    esp_mac: str
+    x: Optional[float] = None
+    y: Optional[float] = None
+
+
+class ListenerCreate(SQLModel):
+    esp_mac: str
+    x: Optional[float] = None
+    y: Optional[float] = None
+
+
+class ListenerUpdate(SQLModel):
+    x: Optional[float] = None
+    y: Optional[float] = None
