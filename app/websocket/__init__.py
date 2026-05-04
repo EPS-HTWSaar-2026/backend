@@ -1,3 +1,3 @@
-from .websockets import start_websockets
+from .websockets import start_websockets, publish
 
-__all__ = {"start_websockets"}
+__all__ = {"start_websockets", "publish"}

@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .database import create_db_and_tables
 from .routers import tags, listeners, packets
-from .ethernet import start_ethernet_listeners
+from .ethernet import start_ethernet_listeners, location_engine_task
 from .websocket import start_websockets
 
 logging.basicConfig(
@@ -18,10 +18,12 @@ async def lifespan(app: FastAPI):
     create_db_and_tables()
     app.state.ethernet_tasks = await start_ethernet_listeners()
     app.state.ws_task = asyncio.create_task(start_websockets())
+    app.state.cal_task = asyncio.create_task(location_engine_task())
     yield
     for task in app.state.ethernet_tasks:
         task.cancel()
     app.state.ws_task.cancel()
+    app.state.cal_task.cancel()
 
 
 app = FastAPI(
