@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import create_db_and_tables
-from .routers import ingest, status, tags, events
+from .routers import ingest, status, tags
 from .ethernet import start_ethernet_listeners
 
 
@@ -34,8 +34,6 @@ app.add_middleware(
 app.include_router(ingest.router)
 app.include_router(status.router)
 app.include_router(tags.router)
-app.include_router(events.router)
-
 
 @app.get("/")
 def root():

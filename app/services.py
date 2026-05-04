@@ -6,31 +6,31 @@ from sqlmodel import Session, select
 from .models import Tag, Event, SystemState
 from .schemas import IngestPayload, TagPublic, EventPublic, StatusPublic
 
-
-ONLINE_THRESHOLD_SECONDS = 10
-STALE_THRESHOLD_SECONDS = 30
-
-
-def normalize_event(event: str) -> str:
-    event = event.strip().lower()
-    if event in {"heartbeat", "button", "detected"}:
-        return event
-    return "unknown"
-
-
-def compute_tag_status(last_seen: datetime, now: Optional[datetime] = None) -> str:
-    now = now or datetime.now(timezone.utc)
-
-    if last_seen.tzinfo is None:
-        last_seen = last_seen.replace(tzinfo=timezone.utc)
-
-    delta = (now - last_seen).total_seconds()
-
-    if delta <= ONLINE_THRESHOLD_SECONDS:
-        return "online"
-    if delta <= STALE_THRESHOLD_SECONDS:
-        return "stale"
-    return "offline"
+#
+# ONLINE_THRESHOLD_SECONDS = 10
+# STALE_THRESHOLD_SECONDS = 30
+#
+#
+# def normalize_event(event: str) -> str:
+#     event = event.strip().lower()
+#     if event in {"heartbeat", "button", "detected"}:
+#         return event
+#     return "unknown"
+#
+#
+# def compute_tag_status(last_seen: datetime, now: Optional[datetime] = None) -> str:
+#     now = now or datetime.now(timezone.utc)
+#
+#     if last_seen.tzinfo is None:
+#         last_seen = last_seen.replace(tzinfo=timezone.utc)
+#
+#     delta = (now - last_seen).total_seconds()
+#
+#     if delta <= ONLINE_THRESHOLD_SECONDS:
+#         return "online"
+#     if delta <= STALE_THRESHOLD_SECONDS:
+#         return "stale"
+#     return "offline"
 
 
 def ingest_payload(payload: IngestPayload, session: Session) -> dict:
@@ -47,39 +47,23 @@ def ingest_payload(payload: IngestPayload, session: Session) -> dict:
             tag_id=payload.tag_id,
             last_seen=timestamp,
             rssi=payload.rssi,
-            status="online",
-            last_event=normalized_event,
             channel=payload.channel,
             source=payload.source,
         )
     else:
         db_tag.last_seen = timestamp
         db_tag.rssi = payload.rssi
-        db_tag.status = "online"
-        db_tag.last_event = normalized_event
         db_tag.channel = payload.channel
         db_tag.source = payload.source
 
-    db_event = Event(
-        time=timestamp,
-        tag_id=payload.tag_id,
-        type=normalized_event,
-        rssi=payload.rssi,
-        source=payload.source,
-        channel=payload.channel,
-    )
-
     session.add(db_tag)
-    session.add(db_event)
     session.commit()
     session.refresh(db_tag)
-    session.refresh(db_event)
 
     return {
         "ok": True,
         "message": "Payload processed successfully",
         "tag_id": db_tag.tag_id,
-        "event_id": db_event.id,
     }
 
 
