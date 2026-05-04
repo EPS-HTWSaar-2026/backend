@@ -17,7 +17,6 @@ CHANNEL_PORTS: dict[int, int] = {
     3: settings.esp_port_3,
 }
 
-
 def _save_packet_sync(tag_mac: str, esp_mac: str, rssi: int) -> None:
     with Session(engine) as session:
         save_packet(
