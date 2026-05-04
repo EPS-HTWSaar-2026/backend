@@ -24,5 +24,5 @@ async def publish(location):
 
 async def start_websockets():
     async with websockets.serve(handler, settings.ip, 8765):
-        logger.debug(f"Server running on ws://{settings.ip}:8765")
+        logger.info(f"Server running on ws://{settings.ip}:8765")
         await asyncio.Future()

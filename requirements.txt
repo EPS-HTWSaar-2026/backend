@@ -4,3 +4,4 @@ sqlmodel
 python-dotenv
 pydantic_settings
 websockets
+numpy

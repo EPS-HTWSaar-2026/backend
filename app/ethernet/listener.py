@@ -1,12 +1,9 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
-
-from sqlmodel import Session
+import time
 
 from ..config import settings
-from ..database import engine
-from ..services import save_packet
+from .grouper import BeaconGrouper
 from .parser import parse_packet
 
 logger = logging.getLogger(__name__)
@@ -17,26 +14,14 @@ CHANNEL_PORTS: dict[int, int] = {
     3: settings.esp_port_3,
 }
 
-def _save_packet_sync(tag_mac: str, esp_mac: str, rssi: int) -> None:
-    with Session(engine) as session:
-        save_packet(
-            tag_mac=tag_mac,
-            esp_mac=esp_mac,
-            rssi=rssi,
-            timestamp=datetime.now(timezone.utc),
-            session=session,
-        )
 
-
-async def _listen_channel(channel: int, host: str, port: int) -> None:
-    logger.info("Channel %d: starting listener %s:%d", channel, host, port)
-
+async def _listen_channel(channel: int, host: str, port: int, grouper: BeaconGrouper) -> None:
     while True:
         writer = None
         try:
-            logger.info("Channel %d: connecting to %s:%d", channel, host, port)
+            logger.debug("Channel %d: connecting to %s:%d", channel, host, port)
             reader, writer = await asyncio.open_connection(host, port)
-            logger.info("Channel %d: connected.", channel)
+            logger.debug("Channel %d: connected.", channel)
 
             while True:
                 line = await reader.readline()
@@ -49,16 +34,14 @@ async def _listen_channel(channel: int, host: str, port: int) -> None:
                     logger.debug("Channel %d: failed to parse line: %r", channel, line)
                     continue
 
-                try:
-                    await asyncio.to_thread(
-                        _save_packet_sync, parsed.mac_tag, parsed.mac_esp, parsed.rssi
-                    )
-                    logger.debug("Channel %d: saved tag=%s rssi=%d", channel, parsed.mac_tag, parsed.rssi)
-                except Exception:
-                    logger.exception("Channel %d: error saving tag %s", channel, parsed.mac_tag)
+                parsed.received_at = time.monotonic()
+                await grouper.add_packet(parsed)
+                logger.debug("Channel %d: queued tag=%s seq=%d rssi=%d",
+                             channel, parsed.mac_tag, parsed.seq, parsed.rssi)
 
         except (ConnectionRefusedError, OSError) as exc:
-            logger.error("Channel %d: network error %s. Retrying in %.0fs", channel, exc, settings.reconnect_delay)
+            logger.error("Channel %d: network error %s. Retrying in %.0fs",
+                         channel, exc, settings.reconnect_delay)
         except Exception:
             logger.exception("Channel %d: unexpected error. Retrying", channel)
         finally:
@@ -72,11 +55,11 @@ async def _listen_channel(channel: int, host: str, port: int) -> None:
         await asyncio.sleep(settings.reconnect_delay)
 
 
-async def start_ethernet_listeners() -> list[asyncio.Task]:
+async def start_ethernet_listeners(grouper: BeaconGrouper) -> list[asyncio.Task]:
     tasks: list[asyncio.Task] = []
     for channel, port in CHANNEL_PORTS.items():
         task = asyncio.create_task(
-            _listen_channel(channel, settings.esp_host, port),
+            _listen_channel(channel, settings.esp_host, port, grouper),
             name=f"ethernet-listener-ch{channel}",
         )
         tasks.append(task)

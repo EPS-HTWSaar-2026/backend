@@ -5,25 +5,34 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .database import create_db_and_tables
 from .routers import tags, listeners, packets
-from .ethernet import start_ethernet_listeners, location_engine_task
+from .ethernet.cal import on_group_ready
+from .ethernet.grouper import BeaconGrouper
+from .ethernet.listener import start_ethernet_listeners
 from .websocket import start_websockets
 
 logging.basicConfig(
-    level=logging.DEBUG, #TODO: Change to INFO for release
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    level=logging.DEBUG,  # TODO: Change to INFO for release
+    format="%(levelname)s: %(asctime)s %(name)s: %(message)s",
 )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_db_and_tables()
-    app.state.ethernet_tasks = await start_ethernet_listeners()
-    app.state.ws_task = asyncio.create_task(start_websockets())
-    app.state.cal_task = asyncio.create_task(location_engine_task())
+    grouper = BeaconGrouper(on_group_ready=on_group_ready)
+
+    app.state.ethernet_tasks = await start_ethernet_listeners(grouper)
+    app.state.grouper_task = asyncio.create_task(
+        grouper.flush_loop(), name="beacon-grouper-flush"
+    )
+    app.state.ws_task = asyncio.create_task(start_websockets(), name = "websocket-channel")
+
     yield
+
     for task in app.state.ethernet_tasks:
         task.cancel()
+    app.state.grouper_task.cancel()
     app.state.ws_task.cancel()
-    app.state.cal_task.cancel()
 
 
 app = FastAPI(
