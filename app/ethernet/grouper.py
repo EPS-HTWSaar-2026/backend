@@ -8,56 +8,68 @@ from .parser import ParsedPacket
 
 logger = logging.getLogger(__name__)
 
-GROUPING_WINDOW = 0.15
+GROUPING_WINDOW = 0.15   # seconds — how long a bucket stays open
 MIN_LISTENERS = 3
+MAX_BUCKET_AGE = 2.0     # drop buckets older than this even if underfull
 
 
 @dataclass
-class PacketGroup:
-    tag_mac: str
-    packets: dict = field(default_factory=dict)
-    deadline: float = 0.0
+class TimeBucket:
+    open_time: float                        # monotonic time this bucket was created
+    deadline: float                         # when to flush it
+    packets: dict[str, ParsedPacket] = field(default_factory=dict)  # mac_esp → best packet
 
 
 class BeaconGrouper:
     def __init__(self, on_group_ready: Callable[[list[ParsedPacket]], Awaitable[None]]):
         self._on_ready = on_group_ready
-        self._groups: dict[str, PacketGroup] = {}
+        # One active bucket per tag MAC
+        self._buckets: dict[str, TimeBucket] = {}
         self._lock = asyncio.Lock()
-
-    def _make_key(self, packet: ParsedPacket) -> str:
-        return f"{packet.mac_tag}:{packet.seq}"
 
     async def add_packet(self, packet: ParsedPacket) -> None:
         async with self._lock:
-            key = self._make_key(packet)
+            now = time.monotonic()
+            tag = packet.mac_tag
+            bucket = self._buckets.get(tag)
 
-            if key not in self._groups:
-                self._groups[key] = PacketGroup(
-                    tag_mac=packet.mac_tag,
-                    deadline=time.monotonic() + GROUPING_WINDOW,
+            # Start a new bucket if none exists or the current one has expired
+            if bucket is None or now >= bucket.deadline:
+                if bucket is not None and len(bucket.packets) >= MIN_LISTENERS:
+                    # Flush the previous bucket immediately before opening a new one
+                    asyncio.get_event_loop().create_task(
+                        self._on_ready(list(bucket.packets.values()))
+                    )
+                    logger.debug("Group created -> send for calculation (early flush)")
+                bucket = TimeBucket(
+                    open_time=now,
+                    deadline=now + GROUPING_WINDOW,
                 )
+                self._buckets[tag] = bucket
 
-            group = self._groups[key]
-            existing = group.packets.get(packet.mac_esp)
+            # Keep the best RSSI reading per ESP
+            existing = bucket.packets.get(packet.mac_esp)
             if existing is None or packet.rssi > existing.rssi:
-                group.packets[packet.mac_esp] = packet
+                bucket.packets[packet.mac_esp] = packet
 
     async def flush_loop(self) -> None:
         while True:
             await asyncio.sleep(0.05)
             now = time.monotonic()
             async with self._lock:
-                expired = [k for k, g in self._groups.items() if now >= g.deadline]
-                for key in expired:
-                    group = self._groups.pop(key)
-                    if len(group.packets) >= MIN_LISTENERS:
+                tags_to_flush = [
+                    tag for tag, b in self._buckets.items()
+                    if now >= b.deadline
+                ]
+                for tag in tags_to_flush:
+                    bucket = self._buckets.pop(tag)
+                    if len(bucket.packets) >= MIN_LISTENERS:
                         asyncio.get_event_loop().create_task(
-                            self._on_ready(list(group.packets.values()))
+                            self._on_ready(list(bucket.packets.values()))
                         )
                         logger.debug("Group created -> send for calculation")
                     else:
                         logger.debug(
-                            "Discarded group %s — only %d listener(s) heard it",
-                            key, len(group.packets)
+                            "Discarded bucket for %s — only %d listener(s) (age=%.3fs)",
+                            tag, len(bucket.packets), now - bucket.open_time
                         )

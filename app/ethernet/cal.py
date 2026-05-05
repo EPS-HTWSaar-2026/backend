@@ -123,6 +123,7 @@ async def on_group_ready(packets: list[ParsedPacket]) -> None:
                 },
                 "listener_count": len(usable),
             })
+            logger.info("sent location x:%f, y:%f", point[0], point[1])
 
     except Exception:
         logger.exception("Unexpected error in on_group_ready")

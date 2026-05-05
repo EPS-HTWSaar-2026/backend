@@ -17,7 +17,6 @@ class ParsedPacket:
     mac_esp: str
     rssi: int
     seq: int
-    received_at: float = field(default=0.0)
 
 
 def parse_packet(raw: bytes) -> Optional[ParsedPacket]:

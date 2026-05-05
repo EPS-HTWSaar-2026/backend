@@ -11,7 +11,7 @@ from .ethernet.listener import start_ethernet_listeners
 from .websocket import start_websockets
 
 logging.basicConfig(
-    level=logging.DEBUG,  # TODO: Change to INFO for release
+    level=logging.INFO,
     format="%(levelname)s: %(asctime)s %(name)s: %(message)s",
 )
 
