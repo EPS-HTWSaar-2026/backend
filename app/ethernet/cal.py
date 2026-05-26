@@ -44,22 +44,22 @@ def compute_error(point, p1, p2, p3, r1, r2, r3):
 
 
 
-def _save_packets(packets: list[ParsedPacket], session: Session) -> None:
-    now = datetime.now(timezone.utc)
-    for p in packets:
-        if session.get(Tag, p.mac_tag) is None:
-            session.add(Tag(tag_mac=p.mac_tag))
-            try:
-                session.flush()
-            except Exception:
-                session.rollback()
-
-        session.add(Packet(
-            tag_mac=p.mac_tag,
-            esp_mac=p.mac_esp,
-            rssi=p.rssi,
-            timestamp=now,
-        ))
+# def _save_packets(packets: list[ParsedPacket], session: Session) -> None:
+#     now = datetime.now(timezone.utc)
+#     for p in packets:
+#         if session.get(Tag, p.mac_tag) is None:
+#             session.add(Tag(tag_mac=p.mac_tag))
+#             try:
+#                 session.flush()
+#             except Exception:
+#                 session.rollback()
+#
+#         session.add(Packet(
+#             tag_mac=p.mac_tag,
+#             esp_mac=p.mac_esp,
+#             rssi=p.rssi,
+#             timestamp=now,
+#         ))
 
 async def on_group_ready(packets: list[ParsedPacket]) -> None:
     try:
@@ -72,7 +72,7 @@ async def on_group_ready(packets: list[ParsedPacket]) -> None:
 
             usable = [p for p in packets if p.mac_esp in listeners]
 
-            _save_packets(usable, session)
+            # _save_packets(usable, session)  <-- DELETED THIS LINE
 
             if len(usable) < 3:
                 logger.debug(
@@ -81,49 +81,3 @@ async def on_group_ready(packets: list[ParsedPacket]) -> None:
                 )
                 session.commit()
                 return
-
-            # Use the 3 strongest signals for trilateration
-            usable.sort(key=lambda p: p.rssi, reverse=True)
-            pks = usable[:3]
-
-            l1, l2, l3 = [listeners[p.mac_esp] for p in pks]
-            p1 = np.array([l1.x, l1.y, 0.0])
-            p2 = np.array([l2.x, l2.y, 0.0])
-            p3 = np.array([l3.x, l3.y, 0.0])
-
-            r1 = rssi_to_distance(pks[0].rssi, l1.rssi_ref)
-            r2 = rssi_to_distance(pks[1].rssi, l2.rssi_ref)
-            r3 = rssi_to_distance(pks[2].rssi, l3.rssi_ref)
-
-            try:
-                point = trilaterate(p1, p2, p3, r1, r2, r3)
-                residuals, rmse, confidence = compute_error(point, p1, p2, p3, r1, r2, r3)
-            except Exception as e:
-                logger.error("Trilateration failed for tag %s: %s", pks[0].mac_tag, e)
-                session.commit()
-                return
-
-            tag = session.exec(select(Tag).where(Tag.tag_mac == pks[0].mac_tag)).first()
-            if tag:
-                tag.x = float(point[0])
-                tag.y = float(point[1])
-                session.add(tag)
-                #TODO: add time later
-
-            session.commit()
-
-            await publish({
-                "tag_mac": pks[0].mac_tag,
-                "x": float(point[0]),
-                "y": float(point[1]),
-                "errors": {
-                    "residuals": residuals.tolist(),
-                    "rmse": rmse,
-                    "confidence": confidence,
-                },
-                "listener_count": len(usable),
-            })
-            logger.info("sent location x:%f, y:%f", point[0], point[1])
-
-    except Exception:
-        logger.exception("Unexpected error in on_group_ready")

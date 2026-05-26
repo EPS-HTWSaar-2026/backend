@@ -101,7 +101,7 @@ def delete_listener(esp_mac: str, session: Session) -> bool:
 
 # --- Packets ---
 
-def save_packet(tag_mac: str, esp_mac: str, rssi: int, timestamp: datetime, session: Session) -> None:
+def save_packet(tag_mac: str, esp_mac: str, rssi: int, raw_packet: str, rx_ctrl: dict, timestamp: datetime, session: Session) -> None:
     if timestamp.tzinfo is None:
         timestamp = timestamp.replace(tzinfo=timezone.utc)
 
@@ -113,7 +113,14 @@ def save_packet(tag_mac: str, esp_mac: str, rssi: int, timestamp: datetime, sess
         except IntegrityError:
             session.rollback()
 
-    session.add(Packet(tag_mac=tag_mac, esp_mac=esp_mac, rssi=rssi, timestamp=timestamp))
+    session.add(Packet(
+        tag_mac=tag_mac, 
+        esp_mac=esp_mac, 
+        rssi=rssi, 
+        raw_packet=raw_packet, 
+        rx_ctrl=rx_ctrl, 
+        timestamp=timestamp
+    ))
     session.commit()
 
 
@@ -124,17 +131,33 @@ def get_packets(session: Session, tag_mac: Optional[str] = None, limit: int = 10
     statement = statement.order_by(Packet.timestamp.desc()).limit(limit)
     packets = session.exec(statement).all()
     return [
-        PacketResponse(id=p.id, tag_mac=p.tag_mac, esp_mac=p.esp_mac, rssi=p.rssi, timestamp=p.timestamp)
+        PacketResponse(
+            id=p.id, 
+            tag_mac=p.tag_mac, 
+            esp_mac=p.esp_mac, 
+            rssi=p.rssi, 
+            raw_packet=p.raw_packet,
+            rx_ctrl=p.rx_ctrl,
+            timestamp=p.timestamp
+        )
         for p in packets
     ]
+
 
 
 def get_packet(packet_id: int, session: Session) -> Optional[PacketResponse]:
     packet = session.get(Packet, packet_id)
     if packet is None:
         return None
-    return PacketResponse(id=packet.id, tag_mac=packet.tag_mac, esp_mac=packet.esp_mac, rssi=packet.rssi, timestamp=packet.timestamp)
-
+    return PacketResponse(
+        id=packet.id, 
+        tag_mac=packet.tag_mac, 
+        esp_mac=packet.esp_mac, 
+        rssi=packet.rssi, 
+        raw_packet=packet.raw_packet,
+        rx_ctrl=packet.rx_ctrl,
+        timestamp=packet.timestamp
+    )
 
 def delete_packet(packet_id: int, session: Session) -> bool:
     packet = session.get(Packet, packet_id)

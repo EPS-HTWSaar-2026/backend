@@ -8,6 +8,8 @@ class PacketResponse(SQLModel):
     tag_mac: str
     esp_mac: str
     rssi: int
+    raw_packet: str
+    rx_ctrl: Dict[str, Any]
     timestamp: datetime
 
 # --- Tag ---

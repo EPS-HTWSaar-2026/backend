@@ -1,6 +1,7 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 
+from sqlalchemy import Column, JSON
 from sqlmodel import Field, SQLModel
 
 
@@ -22,4 +23,6 @@ class Packet(SQLModel, table=True):
     tag_mac: str = Field(index=True)
     esp_mac: str = Field(index=True)
     rssi: int
+    raw_packet: str
+    rx_ctrl: dict = Field(default_factory=dict, sa_column=Column(JSON))
     timestamp: datetime = Field(index=True)
