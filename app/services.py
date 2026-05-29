@@ -26,8 +26,12 @@ def update_tag(tag_mac: str, x: Optional[float], y: Optional[float], session: Se
     tag = session.get(Tag, tag_mac)
     if tag is None:
         return None
-    tag.x = x
-    tag.y = y
+    
+    if x is not None:
+        tag.x = x
+    if y is not None:
+        tag.y = y
+        
     session.add(tag)
     session.commit()
     session.refresh(tag)
@@ -63,26 +67,28 @@ def create_listener(esp_mac: str, rssi_ref: int, x: Optional[float], y: Optional
         listener = Listener(esp_mac=esp_mac, rssi_ref=rssi_ref, x=x, y=y)
     else:
         listener.rssi_ref = rssi_ref
-        listener.x = x
-        listener.y = y
+        if x is not None:
+            listener.x = x
+        if y is not None:
+            listener.y = y
+            
     session.add(listener)
     session.commit()
     session.refresh(listener)
     return ListenerResponse(esp_mac=listener.esp_mac, rssi_ref=listener.rssi_ref, x=listener.x, y=listener.y)
 
 
-def update_listener(esp_mac: str, rssi_ref: Optional[int], x: Optional[float], y: Optional[float], session: Session) -> \
-Optional[ListenerResponse]:
+def update_listener(esp_mac: str, rssi_ref: Optional[int], x: Optional[float], y: Optional[float], session: Session) -> Optional[ListenerResponse]:
     listener = session.get(Listener, esp_mac)
     if listener is None:
         return None
 
     if rssi_ref is not None:
         listener.rssi_ref = rssi_ref
-
-    # Keeping your original logic for x and y
-    listener.x = x
-    listener.y = y
+    if x is not None:
+        listener.x = x
+    if y is not None:
+        listener.y = y
 
     session.add(listener)
     session.commit()
@@ -142,7 +148,6 @@ def get_packets(session: Session, tag_mac: Optional[str] = None, limit: int = 10
         )
         for p in packets
     ]
-
 
 
 def get_packet(packet_id: int, session: Session) -> Optional[PacketResponse]:

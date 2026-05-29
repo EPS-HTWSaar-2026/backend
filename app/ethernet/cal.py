@@ -43,24 +43,6 @@ def compute_error(point, p1, p2, p3, r1, r2, r3):
     return residuals, rmse, confidence_radius
 
 
-
-# def _save_packets(packets: list[ParsedPacket], session: Session) -> None:
-#     now = datetime.now(timezone.utc)
-#     for p in packets:
-#         if session.get(Tag, p.mac_tag) is None:
-#             session.add(Tag(tag_mac=p.mac_tag))
-#             try:
-#                 session.flush()
-#             except Exception:
-#                 session.rollback()
-#
-#         session.add(Packet(
-#             tag_mac=p.mac_tag,
-#             esp_mac=p.mac_esp,
-#             rssi=p.rssi,
-#             timestamp=now,
-#         ))
-
 async def on_group_ready(packets: list[ParsedPacket]) -> None:
     try:
         with Session(engine) as session:
@@ -72,8 +54,6 @@ async def on_group_ready(packets: list[ParsedPacket]) -> None:
 
             usable = [p for p in packets if p.mac_esp in listeners]
 
-            # _save_packets(usable, session)  <-- DELETED THIS LINE
-
             if len(usable) < 3:
                 logger.debug(
                     "Group for tag %s has only %d usable listener(s) — skipping trilateration",
@@ -81,3 +61,37 @@ async def on_group_ready(packets: list[ParsedPacket]) -> None:
                 )
                 session.commit()
                 return
+            
+            usable.sort(key=lambda p: p.rssi, reverse=True)
+            l1 = listeners[usable[0].mac_esp]
+            l2 = listeners[usable[1].mac_esp]
+            l3 = listeners[usable[2].mac_esp]
+
+            p1 = np.array([l1.x, l1.y, 0.0])
+            p2 = np.array([l2.x, l2.y, 0.0])
+            p3 = np.array([l3.x, l3.y, 0.0])
+
+            r1 = rssi_to_distance(usable[0].rssi, l1.rssi_ref)
+            r2 = rssi_to_distance(usable[1].rssi, l2.rssi_ref)
+            r3 = rssi_to_distance(usable[2].rssi, l3.rssi_ref)
+
+            point = trilaterate(p1, p2, p3, r1, r2, r3)
+            residuals, rmse, confidence = compute_error(point, p1, p2, p3, r1, r2, r3)
+
+            tag = session.exec(select(Tag).where(Tag.tag_mac == usable[0].mac_tag)).first()
+            if tag:
+                tag.x = float(point[0])
+                tag.y = float(point[1])
+                session.add(tag)
+                session.commit()
+
+                await publish({
+                    "tag_mac": tag.tag_mac,
+                    "x": tag.x,
+                    "y": tag.y,
+                    "rmse": rmse,
+                    "confidence": confidence,
+                    "listener_count": len(usable)
+                })
+    except Exception as e:
+        logger.error("Trilateration failed for tag %s: %s", packets[0].mac_tag, e)
