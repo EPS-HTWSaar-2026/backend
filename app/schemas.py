@@ -1,6 +1,6 @@
 from datetime import datetime
-from typing import Optional
 from sqlmodel import SQLModel
+from typing import Optional, Dict, Any
 
 # --- Packet ---
 class PacketResponse(SQLModel):
