@@ -1,120 +1,73 @@
 import asyncio
 import logging
-import os
+import time
 from datetime import datetime, timezone
 
-from dotenv import load_dotenv
 from sqlmodel import Session
-
 from ..database import engine
-from ..schemas import IngestPayload
-from ..services import ingest_payload
-from .parser import parse_packet
+from ..services import save_packet
 
-load_dotenv()
+from ..config import settings
+from .grouper import BeaconGrouper
+from .parser import parse_packet, ParsedPacket
 
 logger = logging.getLogger(__name__)
 
-
-ESP_HOST: str = os.getenv("ESP_HOST", "192.168.1.100")
-
 CHANNEL_PORTS: dict[int, int] = {
-    1: int(os.getenv("ESP_PORT_1", "4001")),
-    2: int(os.getenv("ESP_PORT_2", "4002")),
-    3: int(os.getenv("ESP_PORT_3", "4003")),
+    1: settings.esp_port_1,
+    2: settings.esp_port_2,
+    3: settings.esp_port_3,
 }
 
-RECONNECT_DELAY: float = 5.0
-
-READ_BUFFER: int = 512
-
-
-def _save_packet(mac_tag: str, mac_esp: str, rssi: int, channel: int) -> None:
-    payload = IngestPayload(
-        tag_id=mac_tag,
-        event="detected",
-        rssi=rssi,
-        channel=channel,
-        source=mac_esp,
-        timestamp=datetime.now(timezone.utc),
-    )
-    with Session(engine) as session:
-        ingest_payload(payload, session)
-
+def _store_packet_sync(parsed: ParsedPacket):
+    """Synchronous function to save the packet; offloaded to a thread so it doesn't block the async loop."""
+    try:
+        with Session(engine) as session:
+            save_packet(
+                tag_mac=parsed.mac_tag,
+                esp_mac=parsed.mac_esp,
+                rssi=parsed.rssi,
+                raw_packet=parsed.raw_packet,
+                rx_ctrl=parsed.rx_ctrl,
+                timestamp=datetime.now(timezone.utc),
+                session=session
+            )
+    except Exception as e:
+        logger.error(f"Failed to save packet to DB: {e}")
 
 
-async def _listen_channel(channel: int, host: str, port: int) -> None:
-    logger.info("Channel %d: starting listener → %s:%d", channel, host, port)
-
+async def _listen_channel(channel: int, host: str, port: int, grouper: BeaconGrouper) -> None:
     while True:
-        reader: asyncio.StreamReader | None = None
-        writer: asyncio.StreamWriter | None = None
-
+        writer = None
         try:
-            logger.info("Channel %d: connecting to %s:%d …", channel, host, port)
+            logger.debug("Channel %d: connecting to %s:%d", channel, host, port)
             reader, writer = await asyncio.open_connection(host, port)
-            logger.info("Channel %d: connected.", channel)
-
-            buf = bytearray()
+            logger.debug("Channel %d: connected.", channel)
 
             while True:
-                chunk = await reader.read(READ_BUFFER)
-
-                if not chunk:
-                    # Remote closed the connection
+                line = await reader.readline()
+                if not line:
                     logger.warning("Channel %d: connection closed by remote.", channel)
                     break
 
-                buf.extend(chunk)
+                parsed = parse_packet(line)
+                if parsed is None:
+                    continue
 
-                # A packet may arrive fragmented; accumulate until we have enough bytes
-                while len(buf) >= 29:
-                    raw = bytes(buf[:29])
-                    parsed = parse_packet(raw)
+                parsed.received_at = time.monotonic()
+                
+                # STORE TO DB IMMEDIATELY (Dispatched to background thread)
+                asyncio.create_task(asyncio.to_thread(_store_packet_sync, parsed))
 
-                    if parsed is None:
-                        # Bad packet — discard one byte and try to re-sync
-                        logger.debug(
-                            "Channel %d: failed to parse packet, re-syncing. raw=%s",
-                            channel,
-                            raw.hex(),
-                        )
-                        buf = buf[1:]
-                        continue
-
-                    # Good packet — consume it and persist
-                    buf = buf[29:]
-
-                    try:
-                        _save_packet(
-                            mac_tag=parsed.mac_tag,
-                            mac_esp=parsed.mac_esp,
-                            rssi=parsed.rssi,
-                            channel=channel,
-                        )
-                        logger.debug(
-                            "Channel %d: saved tag=%s rssi=%d",
-                            channel,
-                            parsed.mac_tag,
-                            parsed.rssi,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Channel %d: database error for tag %s",
-                            channel,
-                            parsed.mac_tag,
-                        )
+                await grouper.add_packet(parsed)
+                logger.debug("Channel %d: queued tag=%s seq=%d rssi=%d",
+                             channel, parsed.mac_tag, parsed.seq, parsed.rssi)
 
         except (ConnectionRefusedError, OSError) as exc:
-            logger.error(
-                "Channel %d: network error – %s. Retrying in %.0fs …",
-                channel,
-                exc,
-                RECONNECT_DELAY,
-            )
+            logger.error("Channel %d: network error %s. Retrying in %.0fs",
+                         channel, exc, settings.reconnect_delay)
         except Exception:
-            logger.exception("Channel %d: unexpected error. Retrying …", channel)
-
+            logger.exception("Channel %d: unexpected error. Retrying", channel)
         finally:
             if writer is not None:
                 try:
@@ -123,14 +76,14 @@ async def _listen_channel(channel: int, host: str, port: int) -> None:
                 except Exception:
                     pass
 
-        await asyncio.sleep(RECONNECT_DELAY)
+        await asyncio.sleep(settings.reconnect_delay)
 
 
-async def start_ethernet_listeners() -> list[asyncio.Task]:
+async def start_ethernet_listeners(grouper: BeaconGrouper) -> list[asyncio.Task]:
     tasks: list[asyncio.Task] = []
     for channel, port in CHANNEL_PORTS.items():
         task = asyncio.create_task(
-            _listen_channel(channel, ESP_HOST, port),
+            _listen_channel(channel, settings.esp_host, port, grouper),
             name=f"ethernet-listener-ch{channel}",
         )
         tasks.append(task)

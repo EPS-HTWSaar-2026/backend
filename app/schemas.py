@@ -1,41 +1,41 @@
 from datetime import datetime
-from typing import Optional
+from sqlmodel import SQLModel
+from typing import Optional, Dict, Any
 
-from sqlmodel import Field, SQLModel
-
-
-class IngestPayload(SQLModel):
-    tag_id: str = Field(..., min_length=1)
-    event: str = Field(..., min_length=1)
+# --- Packet ---
+class PacketResponse(SQLModel):
+    id: Optional[int] = None
+    tag_mac: str
+    esp_mac: str
     rssi: int
-    channel: int
-    source: str = Field(..., min_length=1)
+    raw_packet: str
+    rx_ctrl: Dict[str, Any]
     timestamp: datetime
 
+# --- Tag ---
+class TagResponse(SQLModel):
+    tag_mac: str
+    x: Optional[float] = None
+    y: Optional[float] = None
 
-class TagPublic(SQLModel):
-    tag_id: str
-    last_seen: datetime
-    rssi: int
-    status: str
-    last_event: str
-    channel: int
-    source: str
+class TagUpdate(SQLModel):
+    x: Optional[float] = None
+    y: Optional[float] = None
 
+# --- Listener ---
+class ListenerResponse(SQLModel):
+    esp_mac: str
+    rssi_ref: int
+    x: Optional[float] = None
+    y: Optional[float] = None
 
-class EventPublic(SQLModel):
-    id: Optional[int] = None
-    time: datetime
-    tag_id: str
-    type: str
-    rssi: int
-    source: str
-    channel: int
+class ListenerCreate(SQLModel):
+    esp_mac: str
+    rssi_ref: int
+    x: Optional[float] = None
+    y: Optional[float] = None
 
-
-class StatusPublic(SQLModel):
-    esp32_connected: bool
-    wrap260_connected: bool
-    channel: Optional[int]
-    last_update: Optional[datetime]
-    tags_detected: int
+class ListenerUpdate(SQLModel):
+    rssi_ref: Optional[int] = None
+    x: Optional[float] = None
+    y: Optional[float] = None
