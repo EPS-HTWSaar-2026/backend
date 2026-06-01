@@ -50,23 +50,21 @@ def delete_tag(tag_mac: str, session: Session) -> bool:
 # --- Listeners ---
 def get_listeners(session: Session) -> list[ListenerResponse]:
     listeners = session.exec(select(Listener)).all()
-    return [ListenerResponse(esp_mac=l.esp_mac, rssi_ref=l.rssi_ref, x=l.x, y=l.y) for l in listeners]
-
+    return [ListenerResponse(esp_mac=l.esp_mac, rssi_ref=l.rssi_ref, channel=l.channel, x=l.x, y=l.y) for l in listeners]
 
 def get_listener(esp_mac: str, session: Session) -> Optional[ListenerResponse]:
     listener = session.get(Listener, esp_mac)
     if listener is None:
         return None
-    return ListenerResponse(esp_mac=listener.esp_mac, rssi_ref=listener.rssi_ref, x=listener.x, y=listener.y)
+    return ListenerResponse(esp_mac=listener.esp_mac, rssi_ref=listener.rssi_ref, channel=listener.channel, x=listener.x, y=listener.y)
 
-
-def create_listener(esp_mac: str, rssi_ref: int, x: Optional[float], y: Optional[float],
-                    session: Session) -> ListenerResponse:
+def create_listener(esp_mac: str, rssi_ref: int, channel: int, x: Optional[float], y: Optional[float], session: Session) -> ListenerResponse:
     listener = session.get(Listener, esp_mac)
     if listener is None:
-        listener = Listener(esp_mac=esp_mac, rssi_ref=rssi_ref, x=x, y=y)
+        listener = Listener(esp_mac=esp_mac, rssi_ref=rssi_ref, channel=channel, x=x, y=y)
     else:
         listener.rssi_ref = rssi_ref
+        listener.channel = channel
         if x is not None:
             listener.x = x
         if y is not None:
@@ -75,16 +73,18 @@ def create_listener(esp_mac: str, rssi_ref: int, x: Optional[float], y: Optional
     session.add(listener)
     session.commit()
     session.refresh(listener)
-    return ListenerResponse(esp_mac=listener.esp_mac, rssi_ref=listener.rssi_ref, x=listener.x, y=listener.y)
+    return ListenerResponse(esp_mac=listener.esp_mac, rssi_ref=listener.rssi_ref, channel=listener.channel, x=listener.x, y=listener.y)
 
 
-def update_listener(esp_mac: str, rssi_ref: Optional[int], x: Optional[float], y: Optional[float], session: Session) -> Optional[ListenerResponse]:
+def update_listener(esp_mac: str, rssi_ref: Optional[int], channel: Optional[int], x: Optional[float], y: Optional[float], session: Session) -> Optional[ListenerResponse]:
     listener = session.get(Listener, esp_mac)
     if listener is None:
         return None
 
     if rssi_ref is not None:
         listener.rssi_ref = rssi_ref
+    if channel is not None:
+        listener.channel = channel
     if x is not None:
         listener.x = x
     if y is not None:
@@ -93,7 +93,7 @@ def update_listener(esp_mac: str, rssi_ref: Optional[int], x: Optional[float], y
     session.add(listener)
     session.commit()
     session.refresh(listener)
-    return ListenerResponse(esp_mac=listener.esp_mac, rssi_ref=listener.rssi_ref, x=listener.x, y=listener.y)
+    return ListenerResponse(esp_mac=listener.esp_mac, rssi_ref=listener.rssi_ref, channel=listener.channel, x=listener.x, y=listener.y)
 
 
 def delete_listener(esp_mac: str, session: Session) -> bool:
@@ -103,7 +103,6 @@ def delete_listener(esp_mac: str, session: Session) -> bool:
     session.delete(listener)
     session.commit()
     return True
-
 
 # --- Packets ---
 

@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, HTTPException
 
 from ..database import SessionDep
@@ -9,6 +10,7 @@ from ..services import (
     get_listeners,
     update_listener,
 )
+from ..ethernet.listener import send_channel_update
 
 router = APIRouter(prefix="/api/listeners", tags=["listeners"])
 
@@ -27,16 +29,24 @@ def read_listener(esp_mac: str, session: SessionDep):
 
 
 @router.post("", response_model=ListenerResponse, status_code=201)
-def add_listener(body: ListenerCreate, session: SessionDep):
-    return create_listener(body.esp_mac, body.rssi_ref, body.x, body.y, session)
+async def add_listener(body: ListenerCreate, session: SessionDep):
+    # Save the new listener and dispatch channel change over Ethernet
+    result = create_listener(body.esp_mac, body.rssi_ref, body.channel, body.x, body.y, session)
+    asyncio.create_task(send_channel_update(body.esp_mac, body.channel))
+    return result
 
 
 @router.patch("/{esp_mac}", response_model=ListenerResponse)
-def patch_listener(esp_mac: str, body: ListenerUpdate, session: SessionDep):
+async def patch_listener(esp_mac: str, body: ListenerUpdate, session: SessionDep):
     """Partial update of listener calibration data or position."""
-    listener = update_listener(esp_mac, body.rssi_ref, body.x, body.y, session)
+    listener = update_listener(esp_mac, body.rssi_ref, body.channel, body.x, body.y, session)
     if listener is None:
         raise HTTPException(status_code=404, detail="Listener not found")
+        
+    # If a new channel was specified, send packet to ESP to switch
+    if body.channel is not None:
+        asyncio.create_task(send_channel_update(esp_mac, body.channel))
+        
     return listener
 
 

@@ -14,6 +14,7 @@ class Tag(SQLModel, table=True):
 class Listener(SQLModel, table=True):
     esp_mac: str = Field(primary_key=True, index=True)
     rssi_ref: int
+    channel: int = 6  # Added channel field
     x: Optional[float] = None
     y: Optional[float] = None
 

@@ -20,9 +20,10 @@ CHANNEL_PORTS: dict[int, int] = {
     3: settings.esp_port_3,
 }
 
+# Keep track of active connections to send commands back
+ACTIVE_WRITERS: dict[str, asyncio.StreamWriter] = {}
 
 def _store_packet_sync(parsed: ParsedPacket) -> None:
-    """Persist the packet; runs in a thread pool so it never blocks the event loop."""
     try:
         with Session(engine) as session:
             save_packet(
@@ -36,6 +37,22 @@ def _store_packet_sync(parsed: ParsedPacket) -> None:
             )
     except Exception as e:
         logger.error("Failed to save packet to DB: %s", e)
+
+
+async def send_channel_update(esp_mac: str, channel: int) -> bool:
+    """Send a plain number over TCP to switch the ESP's channel."""
+    writer = ACTIVE_WRITERS.get(esp_mac)
+    if writer:
+        try:
+            logger.info("Sending channel update [%d] to ESP %s", channel, esp_mac)
+            writer.write(f"{channel}\n".encode("ascii"))
+            await writer.drain()
+            return True
+        except Exception as e:
+            logger.error("Failed to send channel update to ESP %s: %s", esp_mac, e)
+    else:
+        logger.warning("Cannot update channel: ESP %s is not currently connected", esp_mac)
+    return False
 
 
 async def _listen_channel(channel: int, host: str, port: int, grouper: BeaconGrouper) -> None:
@@ -55,13 +72,13 @@ async def _listen_channel(channel: int, host: str, port: int, grouper: BeaconGro
                 parsed = parse_packet(line)
                 if parsed is None:
                     continue
+                
+                # Track writer per ESP MAC to send commands
+                ACTIVE_WRITERS[parsed.mac_esp] = writer
 
                 parsed.received_at = time.monotonic()
-
-                # Persist asynchronously in a thread pool
                 asyncio.create_task(asyncio.to_thread(_store_packet_sync, parsed))
-
-                # Broadcast raw packet to WebSocket packet-channel subscribers
+                
                 asyncio.create_task(
                     publish_packet({
                         "tag_mac": parsed.mac_tag,
@@ -73,16 +90,9 @@ async def _listen_channel(channel: int, host: str, port: int, grouper: BeaconGro
                 )
 
                 await grouper.add_packet(parsed)
-                logger.debug(
-                    "Channel %d: queued tag=%s seq=%d rssi=%d",
-                    channel, parsed.mac_tag, parsed.seq, parsed.rssi,
-                )
 
         except (ConnectionRefusedError, OSError) as exc:
-            logger.error(
-                "Channel %d: network error — %s. Retrying in %.1fs",
-                channel, exc, settings.reconnect_delay,
-            )
+            logger.error("Channel %d: network error — %s. Retrying in %.1fs", channel, exc, settings.reconnect_delay)
         except Exception:
             logger.exception("Channel %d: unexpected error. Retrying", channel)
         finally:

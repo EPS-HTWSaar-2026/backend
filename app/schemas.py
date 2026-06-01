@@ -26,16 +26,19 @@ class TagUpdate(SQLModel):
 class ListenerResponse(SQLModel):
     esp_mac: str
     rssi_ref: int
+    channel: int
     x: Optional[float] = None
     y: Optional[float] = None
 
 class ListenerCreate(SQLModel):
     esp_mac: str
     rssi_ref: int
+    channel: int = 6
     x: Optional[float] = None
     y: Optional[float] = None
 
 class ListenerUpdate(SQLModel):
     rssi_ref: Optional[int] = None
+    channel: Optional[int] = None
     x: Optional[float] = None
     y: Optional[float] = None
