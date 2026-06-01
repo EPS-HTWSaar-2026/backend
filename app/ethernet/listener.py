@@ -4,12 +4,13 @@ import time
 from datetime import datetime, timezone
 
 from sqlmodel import Session
-from ..database import engine
-from ..services import save_packet
 
 from ..config import settings
+from ..database import engine
+from ..services import save_packet
+from ..websocket import publish_packet
 from .grouper import BeaconGrouper
-from .parser import parse_packet, ParsedPacket
+from .parser import ParsedPacket, parse_packet
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +20,9 @@ CHANNEL_PORTS: dict[int, int] = {
     3: settings.esp_port_3,
 }
 
-def _store_packet_sync(parsed: ParsedPacket):
-    """Synchronous function to save the packet; offloaded to a thread so it doesn't block the async loop."""
+
+def _store_packet_sync(parsed: ParsedPacket) -> None:
+    """Persist the packet; runs in a thread pool so it never blocks the event loop."""
     try:
         with Session(engine) as session:
             save_packet(
@@ -30,10 +32,10 @@ def _store_packet_sync(parsed: ParsedPacket):
                 raw_packet=parsed.raw_packet,
                 rx_ctrl=parsed.rx_ctrl,
                 timestamp=datetime.now(timezone.utc),
-                session=session
+                session=session,
             )
     except Exception as e:
-        logger.error(f"Failed to save packet to DB: {e}")
+        logger.error("Failed to save packet to DB: %s", e)
 
 
 async def _listen_channel(channel: int, host: str, port: int, grouper: BeaconGrouper) -> None:
@@ -42,7 +44,7 @@ async def _listen_channel(channel: int, host: str, port: int, grouper: BeaconGro
         try:
             logger.debug("Channel %d: connecting to %s:%d", channel, host, port)
             reader, writer = await asyncio.open_connection(host, port)
-            logger.debug("Channel %d: connected.", channel)
+            logger.info("Channel %d: connected to %s:%d", channel, host, port)
 
             while True:
                 line = await reader.readline()
@@ -55,17 +57,32 @@ async def _listen_channel(channel: int, host: str, port: int, grouper: BeaconGro
                     continue
 
                 parsed.received_at = time.monotonic()
-                
-                # STORE TO DB IMMEDIATELY (Dispatched to background thread)
+
+                # Persist asynchronously in a thread pool
                 asyncio.create_task(asyncio.to_thread(_store_packet_sync, parsed))
 
+                # Broadcast raw packet to WebSocket packet-channel subscribers
+                asyncio.create_task(
+                    publish_packet({
+                        "tag_mac": parsed.mac_tag,
+                        "esp_mac": parsed.mac_esp,
+                        "rssi": parsed.rssi,
+                        "seq": parsed.seq,
+                        "received_at": parsed.received_at,
+                    })
+                )
+
                 await grouper.add_packet(parsed)
-                logger.debug("Channel %d: queued tag=%s seq=%d rssi=%d",
-                             channel, parsed.mac_tag, parsed.seq, parsed.rssi)
+                logger.debug(
+                    "Channel %d: queued tag=%s seq=%d rssi=%d",
+                    channel, parsed.mac_tag, parsed.seq, parsed.rssi,
+                )
 
         except (ConnectionRefusedError, OSError) as exc:
-            logger.error("Channel %d: network error %s. Retrying in %.0fs",
-                         channel, exc, settings.reconnect_delay)
+            logger.error(
+                "Channel %d: network error — %s. Retrying in %.1fs",
+                channel, exc, settings.reconnect_delay,
+            )
         except Exception:
             logger.exception("Channel %d: unexpected error. Retrying", channel)
         finally:

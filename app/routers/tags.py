@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 
 from ..database import SessionDep
 from ..schemas import TagResponse, TagUpdate
-from ..services import get_tags, get_tag, update_tag, delete_tag
+from ..services import delete_tag, get_tag, get_tags, update_tag
 
 router = APIRouter(prefix="/api/tags", tags=["tags"])
 
@@ -21,7 +21,8 @@ def read_tag(tag_mac: str, session: SessionDep):
 
 
 @router.patch("/{tag_mac}", response_model=TagResponse)
-def update_tag_position(tag_mac: str, body: TagUpdate, session: SessionDep):
+def patch_tag(tag_mac: str, body: TagUpdate, session: SessionDep):
+    """Manually override the position of a tag."""
     tag = update_tag(tag_mac, body.x, body.y, session)
     if tag is None:
         raise HTTPException(status_code=404, detail="Tag not found")

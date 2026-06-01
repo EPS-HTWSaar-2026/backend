@@ -1,13 +1,15 @@
-import logging
 import asyncio
+import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from .database import create_db_and_tables
-from .routers import tags, listeners, packets
 from .ethernet.cal import on_group_ready
 from .ethernet.grouper import BeaconGrouper
 from .ethernet.listener import start_ethernet_listeners
+from .routers import listeners, packets, tags
 from .websocket import start_websockets
 
 logging.basicConfig(
@@ -19,26 +21,35 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_db_and_tables()
+
     grouper = BeaconGrouper(on_group_ready=on_group_ready)
 
     app.state.ethernet_tasks = await start_ethernet_listeners(grouper)
     app.state.grouper_task = asyncio.create_task(
         grouper.flush_loop(), name="beacon-grouper-flush"
     )
-    app.state.ws_task = asyncio.create_task(start_websockets(), name = "websocket-channel")
+    app.state.ws_task = asyncio.create_task(
+        start_websockets(), name="websocket-server"
+    )
 
     yield
 
-    for task in app.state.ethernet_tasks:
+    # Graceful shutdown — cancel every background task and wait for them
+    all_tasks = [
+        *app.state.ethernet_tasks,
+        app.state.grouper_task,
+        app.state.ws_task,
+    ]
+    for task in all_tasks:
         task.cancel()
-    app.state.grouper_task.cancel()
-    app.state.ws_task.cancel()
+
+    await asyncio.gather(*all_tasks, return_exceptions=True)
 
 
 app = FastAPI(
     title="RTLS Monitoring Backend",
     description="Backend for ESP32-based tag monitoring and visualization",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -55,9 +66,10 @@ app.include_router(listeners.router)
 app.include_router(packets.router)
 
 
-@app.get("/")
+@app.get("/", tags=["health"])
 def root():
     return {
         "message": "RTLS Monitoring Backend is running",
+        "version": app.version,
         "docs": "/docs",
     }

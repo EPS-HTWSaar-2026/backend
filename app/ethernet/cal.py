@@ -5,8 +5,8 @@ import numpy as np
 from sqlmodel import Session, select
 
 from ..database import engine
-from ..models import Tag, Listener, Packet
-from ..websocket import publish
+from ..models import Listener, Tag
+from ..websocket import publish_location
 from .parser import ParsedPacket, _format_mac
 
 logger = logging.getLogger(__name__)
@@ -16,15 +16,18 @@ def rssi_to_distance(rssi: int, rssi_ref: int, n: float = 2.0) -> float:
     return 10 ** ((rssi_ref - rssi) / (10 * n))
 
 
-def trilaterate(p1, p2, p3, r1, r2, r3):
+def trilaterate(
+    p1: np.ndarray, p2: np.ndarray, p3: np.ndarray,
+    r1: float, r2: float, r3: float,
+) -> np.ndarray:
     temp1 = p2 - p1
     e_x = temp1 / np.linalg.norm(temp1)
     temp2 = p3 - p1
-    i = np.dot(e_x, temp2)
+    i = float(np.dot(e_x, temp2))
     temp3 = temp2 - i * e_x
     e_y = temp3 / np.linalg.norm(temp3)
-    d = np.linalg.norm(p2 - p1)
-    j = np.dot(e_y, temp2)
+    d = float(np.linalg.norm(p2 - p1))
+    j = float(np.dot(e_y, temp2))
     x = (r1 * r1 - r2 * r2 + d * d) / (2 * d)
     y = (r1 * r1 - r3 * r3 - 2 * i * x + i * i + j * j) / (2 * j)
     temp4 = r1 * r1 - x * x - y * y
@@ -32,7 +35,11 @@ def trilaterate(p1, p2, p3, r1, r2, r3):
     return p1 + x * e_x + y * e_y + z * np.cross(e_x, e_y)
 
 
-def compute_error(point, p1, p2, p3, r1, r2, r3):
+def compute_error(
+    point: np.ndarray,
+    p1: np.ndarray, p2: np.ndarray, p3: np.ndarray,
+    r1: float, r2: float, r3: float,
+) -> tuple[np.ndarray, float, float]:
     residuals = np.array([
         np.linalg.norm(point - p1) - r1,
         np.linalg.norm(point - p2) - r2,
@@ -46,7 +53,7 @@ def compute_error(point, p1, p2, p3, r1, r2, r3):
 async def on_group_ready(packets: list[ParsedPacket]) -> None:
     try:
         with Session(engine) as session:
-            listeners = {
+            listeners: dict[str, Listener] = {
                 _format_mac(l.esp_mac): l
                 for l in session.exec(select(Listener)).all()
                 if l.x is not None and l.y is not None
@@ -56,12 +63,12 @@ async def on_group_ready(packets: list[ParsedPacket]) -> None:
 
             if len(usable) < 3:
                 logger.debug(
-                    "Group for tag %s has only %d usable listener(s) — skipping trilateration",
-                    packets[0].mac_tag, len(usable)
+                    "Tag %s: only %d usable listener(s) — skipping trilateration",
+                    packets[0].mac_tag, len(usable),
                 )
-                session.commit()
-                return
-            
+                return  # nothing written, no commit needed
+
+            # Use the three strongest signals
             usable.sort(key=lambda p: p.rssi, reverse=True)
             l1 = listeners[usable[0].mac_esp]
             l2 = listeners[usable[1].mac_esp]
@@ -76,22 +83,29 @@ async def on_group_ready(packets: list[ParsedPacket]) -> None:
             r3 = rssi_to_distance(usable[2].rssi, l3.rssi_ref)
 
             point = trilaterate(p1, p2, p3, r1, r2, r3)
-            residuals, rmse, confidence = compute_error(point, p1, p2, p3, r1, r2, r3)
+            _, rmse, confidence = compute_error(point, p1, p2, p3, r1, r2, r3)
 
-            tag = session.exec(select(Tag).where(Tag.tag_mac == usable[0].mac_tag)).first()
-            if tag:
-                tag.x = float(point[0])
-                tag.y = float(point[1])
-                session.add(tag)
-                session.commit()
+            tag = session.exec(
+                select(Tag).where(Tag.tag_mac == usable[0].mac_tag)
+            ).first()
 
-                await publish({
-                    "tag_mac": tag.tag_mac,
-                    "x": tag.x,
-                    "y": tag.y,
-                    "rmse": rmse,
-                    "confidence": confidence,
-                    "listener_count": len(usable)
-                })
-    except Exception as e:
-        logger.error("Trilateration failed for tag %s: %s", packets[0].mac_tag, e)
+            if tag is None:
+                logger.warning("Tag %s not found in DB — skipping position update", usable[0].mac_tag)
+                return
+
+            tag.x = float(point[0])
+            tag.y = float(point[1])
+            session.add(tag)
+            session.commit()
+
+            await publish_location({
+                "tag_mac": tag.tag_mac,
+                "x": tag.x,
+                "y": tag.y,
+                "rmse": rmse,
+                "confidence": confidence,
+                "listener_count": len(usable),
+            })
+
+    except Exception:
+        logger.exception("Trilateration failed for tag %s", packets[0].mac_tag)
