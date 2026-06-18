@@ -15,11 +15,11 @@ MAX_BUCKET_AGE = 2.0    # drop buckets older than this even if underfull
 
 @dataclass
 class TimeBucket:
-    open_time: float                          # monotonic time this bucket was created
-    deadline: float                           # when to flush it
+    open_time: float
+    deadline: float 
     packets: dict[str, ParsedPacket] = field(
         default_factory=dict
-    )  # mac_esp → best packet
+    )
 
 
 class BeaconGrouper:
@@ -27,7 +27,7 @@ class BeaconGrouper:
         self, on_group_ready: Callable[[list[ParsedPacket]], Awaitable[None]]
     ):
         self._on_ready = on_group_ready
-        self._buckets: dict[str, TimeBucket] = {}  # tag MAC → active bucket
+        self._buckets: dict[str, TimeBucket] = {} 
         self._lock = asyncio.Lock()
 
     async def add_packet(self, packet: ParsedPacket) -> None:

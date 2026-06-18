@@ -13,7 +13,7 @@ from .routers import listeners, packets, tags
 from .websocket import start_websockets
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(levelname)s: %(asctime)s %(name)s: %(message)s",
 )
 

@@ -20,7 +20,6 @@ CHANNEL_PORTS: dict[int, int] = {
     3: settings.esp_port_3,
 }
 
-# Keep track of active connections to send commands back
 ACTIVE_WRITERS: dict[str, asyncio.StreamWriter] = {}
 
 def _store_packet_sync(parsed: ParsedPacket) -> None:

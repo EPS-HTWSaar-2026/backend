@@ -9,7 +9,6 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-# Two independent subscriber sets — one per channel.
 _LOCATION_VIEWERS: set[websockets.ServerConnection] = set()
 _PACKET_VIEWERS: set[websockets.ServerConnection] = set()
 
@@ -18,7 +17,6 @@ _CHANNELS = {
     "packets": _PACKET_VIEWERS,
 }
 
-# ── Handlers ────────────────────────────────────────────────────────────────
 
 async def _handler(websocket: websockets.ServerConnection) -> None:
     """
@@ -78,15 +76,10 @@ async def publish_packet(payload: dict) -> None:
         logger.debug("packet → %s", data)
 
 
-# ── Legacy alias kept for any callers that used `publish` directly ───────────
-async def publish(payload: dict) -> None:
-    await publish_location(payload)
-
-
 # ── Server lifecycle ─────────────────────────────────────────────────────────
 
 async def start_websockets() -> None:
     """Start the WebSocket server and block until cancelled."""
     async with websockets.serve(_handler, settings.ip, 8765):
         logger.info("WebSocket server running on ws://%s:8765", settings.ip)
-        await asyncio.Future()  # run forever
+        await asyncio.Future() 
